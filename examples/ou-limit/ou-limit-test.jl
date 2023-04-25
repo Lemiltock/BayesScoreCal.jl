@@ -243,3 +243,4 @@ allres = testfun.([ou], [N], [N_samples], [vmultiplier], [alphalevels], 1:reps, 
 
 #results
 allres = vcat(reduce(vcat, allres)...)
+ 
