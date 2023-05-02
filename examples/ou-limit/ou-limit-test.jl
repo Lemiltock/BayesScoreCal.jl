@@ -133,8 +133,6 @@ function testfun(ou::Normal, N::Int64, N_samples::Int64, vmultiplier::Float64, a
     # dataframe and add logD
     df_approx_samples = dtransform(DataFrame(approx_samples), :D => vlog => :logD)
     df_true_samples = dtransform(DataFrame(true_samples), :D => vlog => :logD)
-    dtransform!(df_approx_samples, :D => vlog => :logD)
-    dtransform!(df_true_samples, :D => vlog => :logD)
 
     caldist = df_approx_samples[sample(1:nrow(df_approx_samples), N_importance), :]
     dtransform!(caldist, :μ => rescaler(vmultiplier), :μ)
