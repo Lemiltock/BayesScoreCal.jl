@@ -1,11 +1,10 @@
-using DifferentialEquations
+'//home/adam/.julia/packages/CairoMakie/zPic1/src/display.png' using DifferentialEquations
 using DiffEqSensitivity
 using Random
 using Distributions
 using Turing
 using DataFrames
 using StatsPlots
-
 
 function sir_ode!(du,u,p,t)
     (S,I,R,C) = u
@@ -32,48 +31,136 @@ prob_ode = ODEProblem(sir_ode!,u0,tspan,p);
 sol_ode = solve(prob_ode,
                 Tsit5(),
                 saveat = 1.0);
-plot(sol_ode)
+StatsPlots.plot(sol_ode)
 
 # Agent based model version (Continuous for now, use pred/prey for discreet)
 using Agents, Random
 using InteractiveDynamics
 using CairoMakie
 
-@agent SocialAgent ContinuousAgent{2} begin
+const steps_per_day = 24
+
+@agent PoorSoul ContinuousAgent{2} begin
     mass::Float64
+    days_infected::Int # number of days since infection
+    status::Symbol #  :S, :I, or :R
+    β::Float64 # Transmision prob
 end
 
-function ball_model(; speed = 0.002)
-    space2d = ContinuousSpace((2, 2); spacing = 0.02)
-    model = ABM(SocialAgent,
-                space2d,
-                properties = Dict(:dt => 1.0),
-                rng = MersenneTwister(42))
+using DrWatson: @dict
+function sir_initiation(; 
+        infection_period = 4 * steps_per_day, # 30
+        detection_time = 1 * steps_per_day, # 14 
+        reinfection_probability = 0.0, # 0.05, 
+        isolated = 0.0, # Percentage 
+        interaction_radius = 0.01, # 0.012 
+        dt = 1.0, 
+        speed = 0.002,
+        death_rate = 0, # 0.044
+        N = 1000,
+        initial_infected = 10, # 5
+        seed = 42,
+        βmin = 0.05, # 0.4
+        βmax = 0.05, # 0.8
+    )
+    properties = (;
+                  infection_period,
+                  reinfection_probability,
+                  detection_time,
+                  death_rate,
+                  interaction_radius,
+                  dt,
+                 )
+    space = ContinuousSpace((1, 1); spacing = 0.02)
+    model = ABM(PoorSoul,
+                space,
+                properties = properties,
+                rng = MersenneTwister(seed))
     
     # Add 1000 agents to the model
-    for ind in 1:1000
-        pos = Tuple(rand(model.rng, 2)*2)
-        vel = sincos(2π * rand(model.rng)) .* speed
-        add_agent!(pos, model, vel, 1.0)
+    for ind in 1:N
+        pos = Tuple(rand(model.rng, 2))
+        status = ind ≤ N - initial_infected ? :S : :I
+        isisolated = ind ≤ isolated * N
+        mass = isisolated ? Inf : 1.0
+        vel = isisolated ? (0.0, 0.0) : sincos(2π * rand(model.rng)) .* speed
+        β = (βmax - βmin) * rand(model.rng) + βmin
+        add_agent!(pos, model, vel, mass, 0, status, β)
     end
     return model
 end
 
-model = ball_model()
+sir_model = sir_initiation()
 
-agent_step!(agent, model) = move_agent!(agent, model, model.dt)
+sir_colours(a) = a.status == :S ? "#2b2b33" : a.status == :I ? "#bf2642" : "#338c54"
 
-function model_step!(model)
-    for (a1, a2) in interacting_pairs(model, 0.012, :nearest)
+fig, ax, abmp = abmplot(sir_model; ac = sir_colours)
+fig
+
+function transmit!(a1, a2, rp)
+    # Need only 1 infected to transmit
+    count(a.status == :I for a in (a1, a2)) ≠ 1  && return
+    infected, healthy = a1.status == :I ? (a1, a2) : (a2, a1)
+
+    rand(sir_model.rng) > infected.β && return
+
+    if healthy.status == :R
+        return
+        rand(sir_model.rng) > rp && return
+    end
+    healthy.status = :I
+end
+
+function sir_model_step!(model)
+    r = model.interaction_radius
+    for (a1, a2) in interacting_pairs(model, r, :nearest)
+        transmit!(a1, a2, model.reinfection_probability)
         elastic_collision!(a1, a2, :mass)
     end
 end
 
+function sir_agent_step!(agent, model)
+    move_agent!(agent, model, model.dt)
+    update!(agent)
+    recover_or_die!(agent, model)
+end
+
+update!(agent) = agent.status == :I && (agent.days_infected += 1)
+
+function recover_or_die!(agent, model)
+    if agent.days_infected ≥ model.infection_period
+        if rand(model.rng) ≤ model.death_rate
+            kill_agent!(agent, model)
+        else
+            agent.status = :R
+            agent.days_infected = 0
+        end
+    end
+end
+
+sir_model = sir_initiation()
+
+infected(x) = count(i == :I for i in x)
+recovered(x) = count(i == :R for i in x)
+adata = [(:status, infected), (:status, recovered)]
+
+data1, _ = run!(sir_model, sir_agent_step!,  sir_model_step!, 40*24; adata)
+
+figure = Figure()
+ax = figure[1, 1] = Axis(figure; ylabel = "Individuals")
+l1 = lines!(ax, data1[:, dataname((:status, infected))], colour = "#bf2642")
+l2 = lines!(ax, data1[:, dataname((:status, recovered))], colour = "#338c54")
+figure[1, 2][1,1] =
+    Legend(figure, [l1, l2], ["Infected", "Recovered"])
+figure
+
+sir_model = sir_initiation()
+
 abmvideo(
          "socialdist2.mp4",
-         model,
-         agent_step!,
-         model_step!;
+         sir_model,
+         sir_agent_step!,
+         sir_model_step!;
          title = "Move",
          frames = 500,
          spf = 2,
