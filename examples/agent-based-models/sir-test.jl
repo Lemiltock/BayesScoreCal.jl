@@ -1,4 +1,4 @@
-'//home/adam/.julia/packages/CairoMakie/zPic1/src/display.png' using DifferentialEquations
+using DifferentialEquations
 using DiffEqSensitivity
 using Random
 using Distributions
@@ -20,7 +20,6 @@ function sir_ode!(du,u,p,t)
     end
 nothing
 end;
-
 tmax = 40.0
 tspan = (0.0,tmax)
 obstimes = 1.0:1.0:tmax
@@ -32,6 +31,43 @@ sol_ode = solve(prob_ode,
                 Tsit5(),
                 saveat = 1.0);
 StatsPlots.plot(sol_ode)
+
+# Generate data from ODE above.
+C = Array(sol_ode)[4,:] # Cumulative cases
+X = C[2:end] - C[1:(end-1)];
+Random.seed!(1234)
+Y = rand.(Poisson.(X));
+StatsPlots.bar(obstimes,Y,legend=false)
+StatsPlots.plot!(obstimes,X,legend=false)
+
+@model bayes_sir(y) = begin
+  # Calculate number of timepoints
+  l = length(y)
+  i₀ ~ Uniform(0.0,1.0)
+  β ~ Uniform(0.0,1.0)
+  I = i₀*1000.0
+  u0=[1000.0-I,I,0.0,0.0]
+  p=[β,10.0,0.25]
+  tspan = (0.0,float(l))
+  prob = ODEProblem(sir_ode!,
+          u0,
+          tspan,
+          p)
+  sol = solve(prob,
+              Tsit5(),
+              saveat = 1.0)
+  sol_C = Array(sol)[4,:] # Cumulative cases
+  sol_X = sol_C[2:end] - sol_C[1:(end-1)]
+  l = length(y)
+  for i in 1:l
+    y[i] ~ Poisson(sol_X[i])
+  end
+end;
+
+ode_nuts = sample(bayes_sir(Y),NUTS(1.0),10000);
+
+describe(ode_nuts)
+StatsPlots.plot(ode_nuts)
 
 # Agent based model version (Continuous for now, use pred/prey for discreet)
 using Agents, Random
@@ -90,12 +126,13 @@ function sir_initiation(;
     return model
 end
 
-sir_model = sir_initiation()
+# Makes a picture of initial state
+#sir_model = sir_initiation()
 
-sir_colours(a) = a.status == :S ? "#2b2b33" : a.status == :I ? "#bf2642" : "#338c54"
+#sir_colours(a) = a.status == :S ? "#2b2b33" : a.status == :I ? "#bf2642" : "#338c54"
 
-fig, ax, abmp = abmplot(sir_model; ac = sir_colours)
-fig
+#fig, ax, abmp = abmplot(sir_model; ac = sir_colours)
+#fig
 
 function transmit!(a1, a2, rp)
     # Need only 1 infected to transmit
@@ -154,15 +191,16 @@ figure[1, 2][1,1] =
     Legend(figure, [l1, l2], ["Infected", "Recovered"])
 figure
 
-sir_model = sir_initiation()
-
-abmvideo(
-         "socialdist2.mp4",
-         sir_model,
-         sir_agent_step!,
-         sir_model_step!;
-         title = "Move",
-         frames = 500,
-         spf = 2,
-         framerate = 25,
-        )
+# Creates animation of ABM
+#sir_model = sir_initiation()
+#
+#abmvideo(
+#         "socialdist2.mp4",
+#         sir_model,
+#         sir_agent_step!,
+#         sir_model_step!;
+#         title = "Move",
+#         frames = 500,
+#         spf = 2,
+#         framerate = 25,
+#        )
