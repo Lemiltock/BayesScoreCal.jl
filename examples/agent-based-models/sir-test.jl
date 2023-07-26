@@ -10,9 +10,11 @@ using Agents, Random
 using InteractiveDynamics
 using CairoMakie
 
+using BayesScoreCal
+
 # Approximate/true model settings
 N_samples = 1000
-n_adapt = 1000
+N_adapt = 1000
 
 # Optimisation settings
 N_importance = 200
@@ -172,28 +174,65 @@ ode_nuts = sample(bayes_sir(Y),NUTS(1.0),1000);
 
 #describe(ode_nuts)
 #StatsPlots.plot(ode_nuts)
+# Generate weights for each theta
+#
+# logjoint(bayes_sir(Y), need named fileds to pass here)
+is_weights = ones(1000)
 
 # Get posterior samples
 post_i₀ = ode_nuts[:i₀]
 post_β = ode_nuts[:β]
 
-# Setup for approximate distribution (for first dist)
-tmax = 40.0
-tspan = (0.0,tmax)
-obstimes = 1.0:1.0:tmax
-I = post_i₀[1]*1000.0
-u0 = [1000.0 - I,I,0.0,0.0] # S,I.R,C
-p = [post_β[1],10.0,0.25]; # β,c,γ
+tr_app_samples_i₀ = Matrix{Float64}(undef, N_energy, N_adapt)
+tr_app_samples_β = Matrix{Float64}(undef, N_energy, N_adapt)
 
-prob_ode = ODEProblem(sir_ode!,u0,tspan,p); sol_ode = solve(prob_ode,
-                Tsit5(),
-                saveat = 1.0);
-sol_ode = solve(prob_ode,
-                Tsit5(),
-                saveat = 1.0);
+for t in 1:1000
+    next = false # This allows for ode solver error catching
+    reps = 0
+    while next == false
+        try
+            # Setup for approximate distribution (for first dist)
+            tmax = 40.0
+            tspan = (0.0,tmax)
+            obstimes = 1.0:1.0:tmax
+            I = post_i₀[t]*1000.0
+            u0 = [1000.0 - I,I,0.0,0.0] # S,I.R,C
+            p = [post_β[t],10.0,0.25]; # β,c,γ
 
-# Generate new data from ODE above
-C = Array(sol_ode)[4,:] # Cumulative cases
-X = C[2:end] - C[1:(end-1)];
-Z = rand.(Poisson.(X))
-tmp_ode_nuts = sample(bayes_sir(Z), NUTS(1.0), 1000); 
+            prob_ode = ODEProblem(sir_ode!,u0,tspan,p); sol_ode = solve(prob_ode,
+                            Tsit5(),
+                            saveat = 1.0);
+            sol_ode = solve(prob_ode,
+                            Tsit5(),
+                            saveat = 1.0);
+
+            # Generate new data from ODE above
+            C = Array(sol_ode)[4,:] # Cumulative cases
+            X = C[2:end] - C[1:(end-1)];
+            Z = rand.(Poisson.(X))
+            tmp_ode_nuts = sample(bayes_sir(Z), NUTS(1.0), 1000); 
+
+            tr_app_samples_i₀[:, t] = tmp_ode_nuts[:i₀]
+            tr_app_samples_β[:, t] = tmp_ode_nuts[:β]
+            next = true
+
+        catch e
+            next = false
+            reps += 1
+            if(reps == 10) # Avoid infinite loops adjust as req
+                next = true
+            end
+        end
+    end
+end
+
+
+cal = Calibration(post_β, tr_app_samples_β)
+tf = UnivariateAffine() # Energy score calibration updates this.
+res = energyscorecalibrate!(tf, cal, w; β = energyβ, options = options)
+samplecomp = DataFrame(
+    samples = tf.(map(x-> x, app_samples), [mean(app_samples)]),
+    method = "Adjust-post",
+    iter = 1,
+    alpha = alpha,
+)
