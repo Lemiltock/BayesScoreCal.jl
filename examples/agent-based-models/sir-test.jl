@@ -10,6 +10,7 @@ using Agents, Random
 using InteractiveDynamics
 using CairoMakie
 
+using Optim
 using BayesScoreCal
 
 # Approximate/true model settings
@@ -20,7 +21,8 @@ N_adapt = 1000
 N_importance = 200
 N_energy = 1000
 energyβ = 1.0
-vmultiplier = 2.0
+vmultiplier = 1.0
+options = Optim.Options(f_tol = 0.00001)
 
 # Generate data with ABM
 const steps_per_day = 24
@@ -180,8 +182,8 @@ ode_nuts = sample(bayes_sir(Y),NUTS(1.0),1000);
 is_weights = ones(1000)
 
 # Get posterior samples
-post_i₀ = ode_nuts[:i₀]
-post_β = ode_nuts[:β]
+post_i₀ = vec(ode_nuts[:i₀].data)
+post_β = vec(ode_nuts[:β].data)
 
 tr_app_samples_i₀ = Matrix{Float64}(undef, N_energy, N_adapt)
 tr_app_samples_β = Matrix{Float64}(undef, N_energy, N_adapt)
@@ -229,10 +231,23 @@ end
 
 cal = Calibration(post_β, tr_app_samples_β)
 tf = UnivariateAffine() # Energy score calibration updates this.
-res = energyscorecalibrate!(tf, cal, w; β = energyβ, options = options)
-samplecomp = DataFrame(
-    samples = tf.(map(x-> x, app_samples), [mean(app_samples)]),
-    method = "Adjust-post",
-    iter = 1,
-    alpha = alpha,
-)
+res = energyscorecalibrate!(tf, cal, is_weights; β = energyβ, options = options)
+samples_β = tf.(map(x-> x, tr_app_samples_β), [mean(tr_app_samples_β)])
+cal = Calibration(post_i₀, tr_app_samples_i₀)
+tf = UnivariateAffine() # Energy score calibration updates this.
+res = energyscorecalibrate!(tf, cal, is_weights; β = energyβ, options = options)
+samples_i₀ = tf.(map(x-> x, tr_app_samples_i₀), [mean(tr_app_samples_i₀)])
+
+#samplecomp = DataFrame(
+#    samples = tf.(map(x-> x, tr_app_samples_β), [mean(tr_app_samples_β)]),
+#    method = "Adjust-post",
+#    iter = 1,
+#    alpha = alpha,
+#)
+
+
+# transform
+bij_all = bijector(bayes_sir)
+bij = Bijectors.stack(bij_all.bs[1:length(initial_par)]...)
+
+
