@@ -228,7 +228,7 @@ for t in 1:1000
     end
 end
 
-
+# Univariate
 cal = Calibration(post_β, tr_app_samples_β)
 tf = UnivariateAffine() # Energy score calibration updates this.
 res = energyscorecalibrate!(tf, cal, is_weights; β = energyβ, options = options)
@@ -237,6 +237,9 @@ cal = Calibration(post_i₀, tr_app_samples_i₀)
 tf = UnivariateAffine() # Energy score calibration updates this.
 res = energyscorecalibrate!(tf, cal, is_weights; β = energyβ, options = options)
 samples_i₀ = tf.(map(x-> x, tr_app_samples_i₀), [mean(tr_app_samples_i₀)])
+# Multivariate
+post_joint = [[a, b] for (a,b) in zip(post_β, post_i₀)]
+# Look at matrix comprehension for app_samples)
 
 #samplecomp = DataFrame(
 #    samples = tf.(map(x-> x, tr_app_samples_β), [mean(tr_app_samples_β)]),
@@ -244,10 +247,5 @@ samples_i₀ = tf.(map(x-> x, tr_app_samples_i₀), [mean(tr_app_samples_i₀)])
 #    iter = 1,
 #    alpha = alpha,
 #)
-
-
-# transform
-bij_all = bijector(bayes_sir)
-bij = Bijectors.stack(bij_all.bs[1:length(initial_par)]...)
 
 
