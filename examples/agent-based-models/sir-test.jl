@@ -40,9 +40,9 @@ function sir_initiation(;
         detection_time = 1 * steps_per_day, # 14 
         reinfection_probability = 0.0, # 0.05, 
         isolated = 0.0, # Percentage 
-        interaction_radius = 0.01, # 0.012 
+        interaction_radius = 0.005, # 0.012 
         dt = 1.0, 
-        speed = 0.002,
+        speed = 0.001,
         death_rate = 0, # 0.044
         N = 1000,
         initial_infected = 10, # 5
@@ -131,7 +131,7 @@ tmp = data1[1:24:end, 2:3] # Grab one obs per day
 infect = tmp[2:end,1] - tmp[1:(end-1),1]
 recov = tmp[2:end,2] - tmp[1:(end-1),2]
 Y = infect + recov
-
+Z = 
 # Setup SIR ODE
 function sir_ode!(du,u,p,t)
     (S,I,R,C) = u
@@ -172,7 +172,8 @@ end;
   end
 end;
 
-ode_nuts = sample(bayes_sir(Y),NUTS(1.0),1000);
+sir_bayes_model = bayes_sir(Y)
+ode_nuts = sample(sir_bayes_model,NUTS(1.0),1000);
 
 #describe(ode_nuts)
 #StatsPlots.plot(ode_nuts)
@@ -181,7 +182,7 @@ ode_nuts = sample(bayes_sir(Y),NUTS(1.0),1000);
 # logjoint(bayes_sir(Y), need named fileds to pass here)
 is_weights = ones(1000)
 
-# Get posterior samples
+# Get posterior samples (TODO: update to joint samples)
 post_i₀ = vec(ode_nuts[:i₀].data)
 post_β = vec(ode_nuts[:β].data)
 
@@ -228,18 +229,65 @@ for t in 1:1000
     end
 end
 
+# Transform and calibration
+function multiplyscale(x::Matrix{Vector{Float64}}, scale::Float64) 
+    μ = mean(x)
+    scale .* (x .- [μ]) .+ [μ]
+end
+
+bij_all = bijector(sir_bayes_model)
+bij = Bijectors.Stacked(bij_all.bs[1:2]...)
+
+# Get joint samples
+post_joint = [[a, b] for (a,b) in zip(post_β, post_i₀)]
+tr_app_samples_joint = Matrix{Vector{Float64}}(undef, 1000, 1000)
+for i in 1:1000
+    tr_app_samples_joint[:,i] = [[a,b] for (a,b) in 
+                                 zip(tr_app_samples_β[:,i], 
+                                     tr_app_samples_i₀[:,i])]
+end
+tr_app_samples_joint_old = tr_app_samples_joint
+
+# X-form them
+tr_app_samples_joint = inverse(bij).(multiplyscale(bij.(tr_app_samples_joint),
+                                                   1.0))
+
+# Grab univariate out again
+for i in 1:N_adapt
+    for j in 1:N_energy
+        tr_app_samples_β[i, j] = tr_app_samples_joint[i, j][1]
+        tr_app_samples_i₀[i, j] = tr_app_samples_joint[i, j][2]
+    end
+end
+
 # Univariate
+# β
 cal = Calibration(post_β, tr_app_samples_β)
 tf = UnivariateAffine() # Energy score calibration updates this.
 res = energyscorecalibrate!(tf, cal, is_weights; β = energyβ, options = options)
 samples_β = tf.(map(x-> x, tr_app_samples_β), [mean(tr_app_samples_β)])
+# i₀
 cal = Calibration(post_i₀, tr_app_samples_i₀)
 tf = UnivariateAffine() # Energy score calibration updates this.
 res = energyscorecalibrate!(tf, cal, is_weights; β = energyβ, options = options)
 samples_i₀ = tf.(map(x-> x, tr_app_samples_i₀), [mean(tr_app_samples_i₀)])
 # Multivariate
-post_joint = [[a, b] for (a,b) in zip(post_β, post_i₀)]
-# Look at matrix comprehension for app_samples)
+
+cal = Calibration(post_joint, tr_app_samples_joint)
+d = BayesScoreCal.dimension(cal)[1]
+tf = CholeskyAffine(d)
+res = energyscorecalibrate!(tf, cal, is_weights)
+samples_joint = tf.(map(x-> x, tr_app_samples_joint), 
+                    [mean(tr_app_samples_joint)])
+
+# Use for save purposes
+# for i in 1:N_adapt
+#     for j in 1:N_energy
+#         samples_β[i, j] = samples_joint[i, j][1]
+#         samples_i₀[i, j] = samples_joint[i, j][2]
+#     end
+# end
+# CSV.wirte("FILE.csv", Tables.table(matrix), writeheader=false)
 
 #samplecomp = DataFrame(
 #    samples = tf.(map(x-> x, tr_app_samples_β), [mean(tr_app_samples_β)]),
@@ -249,3 +297,8 @@ post_joint = [[a, b] for (a,b) in zip(post_β, post_i₀)]
 #)
 
 
+# data_cache = load_object("examples/agent-based-models/sir-cache.jld2")
+# post_β = data_cache.post_β
+# post_i₀ = data_cache.post_i₀
+# tr_app_samples_β = data_cache.tr_app_samples_β
+# tr_app_samples_i₀ = data_cache.tr_app_samples_i₀
