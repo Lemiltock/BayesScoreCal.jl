@@ -76,7 +76,6 @@ CI_check <- function(act, approx){
 }
 
 
-
 # Read in true samples
 trueB <- as.vector(read.csv("trueB.csv", header=F))$V1
 truei <- as.vector(read.csv("truei.csv", header=F))$V1
@@ -98,7 +97,7 @@ for(i in 1:1000){
 }
 
 
-### Test ###
+# Generate CI
 test <- CI_check(truejoint, joint)
 testB <- CI_check(trueB, uniB)
 testi <- CI_check(truei, unii)
@@ -113,7 +112,48 @@ for(i in 1:length(true)){
     appi[i] = sum(testi < true[i])/1000
 }
 
-plot(c(0,1), c(0,1), type='l')
-lines(app, true, col='blue')
-lines(appB, true, col='green')
-lines(appi, true, col='yellow')
+### Quick plot
+# plot(c(0,1), c(0,1), type='l')
+# lines(app, true, col='blue')
+# lines(appB, true, col='green')
+# lines(appi, true, col='yellow')
+
+# Generate nice plot
+plot_data <- data.frame('Target coverage'=c(app, appB, appi),
+                        'Actual coverage'=c(true, true,true),
+                        'Params'=c(rep('(B, u)', length(app)),
+                                   rep('B', length(app)),
+                                   rep('u', length(app))))
+
+# Setup legend labels
+my.labs <- list(bquote(beta ~ "," ~ mu),bquote(beta),bquote(mu))
+
+# Get colours for groups
+default_palette = scales::hue_pal()(3)
+
+p1 <- ggplot(plot_data, aes(x=Target.coverage,
+                            y=Actual.coverage,
+                            colour=Params)) +
+        geom_line() +
+        geom_abline(slope=1, intercept=0) +
+        geom_abline(slope=1, intercept=0.1, linetype="dashed") + 
+        geom_abline(slope=1, intercept=-0.1, linetype="dashed") +
+        xlim(0, 1) +
+        scale_x_continuous(breaks=c(0, 0.2, 0.4, 0.6, 0.8, 1)) +
+        ylim(0, 1) +
+        scale_y_continuous(breaks=c(0, 0.2, 0.4, 0.6, 0.8, 1)) +
+        labs(x="Target coverage", y="Actual coverage", color=NULL) +
+        scale_colour_manual(values=default_palette,
+                            breaks=c("(B, u)", "B", "u"),
+                            labels=my.labs) +
+        theme_linedraw()
+
+savename <- "ABM_CI_plot.eps"
+
+ggsave(savename,
+       plot=p1,
+       device = "eps",
+       dpi = 1200,
+       width = 20,
+       height = 15,
+       units = "cm")
