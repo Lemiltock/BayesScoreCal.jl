@@ -1,0 +1,119 @@
+library(ggplot2)
+library(ks)
+
+CI_check <- function(act, approx){
+    if(is.vector(act)){
+        # act is 1d-mat of samples, approx is matrix each col is for an act samp
+        N <- length(act)
+        res <- rep(0, N)
+        for(i in 1:N){
+            # Get current sample and approx samples
+            curr_samp <- act[i]
+            approx_samps <- approx[,i]
+
+            # Density estimate for approx dist
+            approx_dist <- kde(approx_samps)
+
+            # Find alpha level of true value
+            idx <- order(approx_dist$estimate, decreasing=T)
+            dx <- approx_dist$eval.point[2] - approx_dist$eval.point[1]
+            finalest <- which.min(abs(curr_samp - approx_dist$eval.point))
+            CI <- 0
+            for(j in idx){
+                # Loop over highest density until reach current value
+                CI <- CI + (approx_dist$estimate[j] * dx)
+                if(j == finalest){
+                    break
+                }
+            }
+            res[i] <- CI
+        }
+    } else {
+        # Treat act as multivariate
+        N <- dim(act) # N[1] num samps, N[2] num params
+        res <- rep(0, N[1])
+        for(i in 1:N[1]){
+            # Get current sample and approx samples
+            curr_samp <- act[i,]
+            approx_samps <- approx[,i,]
+            
+            # Density estimate for approx dist
+            approx_dist <- kde(approx_samps)
+
+            # Find alpha level of true value
+            idx <- order(approx_dist$estimate, decreasing=T)
+            dx <- 1
+            for(k in 1:length(dim(approx_dist$estimate))){
+                dx <- dx * (approx_dist$eval.point[[k]][2] - 
+                            approx_dist$eval.point[[k]][1])
+            }
+            finalest <- 0
+            for(j in N[2]:1){
+                # Get flattened value for matrix
+                evalidx <- which.min(abs(curr_samp[j] -
+                                         approx_dist$eval.point[[j]]))
+                if(j != 1){
+                    # Not in the last row so need to mulitply by possible rows
+                    nrows <- dim(approx_dist$estimate)[j]
+                    finalest <- finalest + ((evalidx - 1) * nrows)
+                } else { # j = 1
+                    # In final row
+                    finalest <- finalest + evalidx
+                }
+            } 
+            CI <- 0
+            for(j in idx){
+                # Loop over highest density until reach current value
+                CI <- CI + (approx_dist$estimate[j] * dx)
+                if(j == finalest){
+                    break
+                }
+            }
+            res[i] <- CI
+        }
+    }
+    return(res)
+}
+
+
+
+# Read in true samples
+trueB <- as.vector(read.csv("trueB.csv", header=F))$V1
+truei <- as.vector(read.csv("truei.csv", header=F))$V1
+truejoint <- cbind(trueB, truei)
+
+# Read in uni approx samples
+uniB <- read.csv("uniB.csv", header=F)
+unii <- read.csv("unii.csv", header=F)
+
+# Read in joint approx samples
+joinB <- read.csv("joinB.csv", header=F)
+joini <- read.csv("joini.csv", header=F)
+joint <- array(rep(0, 1000*1000*2), c(1000, 1000, 2))
+for(i in 1:1000){
+    for(j in 1:1000){
+        joint[i,j,1] <- joinB[i,j]
+        joint[i,j,2] <- joini[i,j]
+    }
+}
+
+
+### Test ###
+test <- CI_check(truejoint, joint)
+testB <- CI_check(trueB, uniB)
+testi <- CI_check(truei, unii)
+
+true <- seq(0.05, 0.95, 0.01)
+app <- true
+appB <- true
+appi <- true
+for(i in 1:length(true)){
+    app[i] = sum(test < true[i])/1000
+    appB[i] = sum(testB < true[i])/1000
+    appi[i] = sum(testi < true[i])/1000
+}
+
+plot(c(0,1), c(0,1), type='l')
+lines(app, true, col='blue')
+lines(appB, true, col='green')
+lines(appi, true, col='yellow')
