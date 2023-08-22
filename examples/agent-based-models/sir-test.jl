@@ -5,11 +5,10 @@ using Distributions
 using Turing
 using DataFrames
 using StatsPlots
-
-using Agents, Random
+using CSV
+using Agents
 using InteractiveDynamics
 using CairoMakie
-
 using Optim
 using BayesScoreCal
 
@@ -131,7 +130,7 @@ tmp = data1[1:24:end, 2:3] # Grab one obs per day
 infect = tmp[2:end,1] - tmp[1:(end-1),1]
 recov = tmp[2:end,2] - tmp[1:(end-1),2]
 Y = infect + recov
-Z = 
+ 
 # Setup SIR ODE
 function sir_ode!(du,u,p,t)
     (S,I,R,C) = u
@@ -229,6 +228,10 @@ for t in 1:1000
     end
 end
 
+# Store un-xform samples
+CSV.write("examples/agent-based-models/preB.csv", Tables.table(tr_app_samples_β), writeheader=false)
+CSV.write("examples/agent-based-models/prei.csv", Tables.table(tr_app_samples_i₀), writeheader=false)
+
 # Transform and calibration
 function multiplyscale(x::Matrix{Vector{Float64}}, scale::Float64) 
     μ = mean(x)
@@ -246,7 +249,6 @@ for i in 1:1000
                                  zip(tr_app_samples_β[:,i], 
                                      tr_app_samples_i₀[:,i])]
 end
-tr_app_samples_joint_old = tr_app_samples_joint
 
 # X-form them
 tr_app_samples_joint = inverse(bij).(multiplyscale(bij.(tr_app_samples_joint),
@@ -287,7 +289,12 @@ samples_joint = tf.(map(x-> x, tr_app_samples_joint),
 #         samples_i₀[i, j] = samples_joint[i, j][2]
 #     end
 # end
-# CSV.wirte("FILE.csv", Tables.table(matrix), writeheader=false)
+CSV.write("examples/agent-based-models/uniB.csv", Tables.table(tr_app_samples_β), writeheader=false)
+CSV.write("examples/agent-based-models/unii.csv", Tables.table(tr_app_samples_i₀), writeheader=false)
+CSV.write("examples/agent-based-models/trueB.csv", Tables.table(post_β), writeheader=false)
+CSV.write("examples/agent-based-models/truei.csv", Tables.table(post_i₀), writeheader=false)
+CSV.write("examples/agent-based-models/joinB.csv", Tables.table(samples_β), writeheader=false)
+CSV.write("examples/agent-based-models/joini.csv", Tables.table(samples_i₀), writeheader=false)
 
 #samplecomp = DataFrame(
 #    samples = tf.(map(x-> x, tr_app_samples_β), [mean(tr_app_samples_β)]),
