@@ -5,11 +5,10 @@ using Distributions
 using Turing
 using DataFrames
 using StatsPlots
-
-using Agents, Random
+using CSV
+using Agents
 using InteractiveDynamics
 using CairoMakie
-
 using Optim
 using BayesScoreCal
 
@@ -42,6 +41,63 @@ function multiplyscale(x::Matrix{Vector{Float64}}, scale::Float64)
 end
 
 
+<<<<<<< HEAD
+=======
+function transmit!(a1, a2, rp)
+    # Need only 1 infected to transmit
+    count(a.status == :I for a in (a1, a2)) ≠ 1  && return
+    infected, healthy = a1.status == :I ? (a1, a2) : (a2, a1)
+
+    rand(sir_model.rng) > infected.β && return
+
+    if healthy.status == :R
+        return
+        rand(sir_model.rng) > rp && return
+    end
+    healthy.status = :I
+end
+
+function sir_model_step!(model)
+    r = model.interaction_radius
+    for (a1, a2) in interacting_pairs(model, r, :nearest)
+        transmit!(a1, a2, model.reinfection_probability)
+        elastic_collision!(a1, a2, :mass)
+    end
+end
+
+function sir_agent_step!(agent, model)
+    move_agent!(agent, model, model.dt)
+    update!(agent)
+    recover_or_die!(agent, model)
+end
+
+update!(agent) = agent.status == :I && (agent.days_infected += 1)
+
+function recover_or_die!(agent, model)
+    if agent.days_infected ≥ model.infection_period
+        if rand(model.rng) ≤ model.death_rate
+            kill_agent!(agent, model)
+        else
+            agent.status = :R
+            agent.days_infected = 0
+        end
+    end
+end
+
+sir_model = sir_initiation()
+
+infected(x) = count(i == :I for i in x)
+recovered(x) = count(i == :R for i in x)
+adata = [(:status, infected), (:status, recovered)]
+
+data1, _ = run!(sir_model, sir_agent_step!,  sir_model_step!, 40*24; adata)
+
+# Generate data for ODE
+tmp = data1[1:24:end, 2:3] # Grab one obs per day
+infect = tmp[2:end,1] - tmp[1:(end-1),1]
+recov = tmp[2:end,2] - tmp[1:(end-1),2]
+Y = infect + recov
+>>>>>>> refs/remotes/origin/update-examples
  
 # Setup SIR ODE
 function sir_ode!(du,u,p,t)
@@ -186,8 +242,20 @@ function testfun(N_adapt::Int64, N_samples::Int64, vmultiplier::Float64,
         end
     end
 
+<<<<<<< HEAD
     # Generate ABM data
     sir_model = sir_initiation()
+=======
+# Store un-xform samples
+CSV.write("examples/agent-based-models/preB.csv", Tables.table(tr_app_samples_β), writeheader=false)
+CSV.write("examples/agent-based-models/prei.csv", Tables.table(tr_app_samples_i₀), writeheader=false)
+
+# Transform and calibration
+function multiplyscale(x::Matrix{Vector{Float64}}, scale::Float64) 
+    μ = mean(x)
+    scale .* (x .- [μ]) .+ [μ]
+end
+>>>>>>> refs/remotes/origin/update-examples
 
     infected(x) = count(i == :I for i in x)
     recovered(x) = count(i == :R for i in x)
@@ -195,6 +263,7 @@ function testfun(N_adapt::Int64, N_samples::Int64, vmultiplier::Float64,
     # Need to add variable for time length here
     data1, _ = run!(sir_model, sir_agent_step!,  sir_model_step!, 40*24; adata)
 
+<<<<<<< HEAD
     # Generate data for ODE
     tmp = data1[1:steps_per_day:end, 2:3] # Grab one obs per day
     infect = tmp[2:end,1] - tmp[1:(end-1),1]
@@ -202,6 +271,16 @@ function testfun(N_adapt::Int64, N_samples::Int64, vmultiplier::Float64,
     Y = infect + recov
     sir_bayes_model = bayes_sir(Y)
     ode_nuts = sample(sir_bayes_model,NUTS(1.0),N_samples);
+=======
+# Get joint samples
+post_joint = [[a, b] for (a,b) in zip(post_β, post_i₀)]
+tr_app_samples_joint = Matrix{Vector{Float64}}(undef, 1000, 1000)
+for i in 1:1000
+    tr_app_samples_joint[:,i] = [[a,b] for (a,b) in 
+                                 zip(tr_app_samples_β[:,i], 
+                                     tr_app_samples_i₀[:,i])]
+end
+>>>>>>> refs/remotes/origin/update-examples
 
     is_weights = ones(N_samples)
 
@@ -378,7 +457,12 @@ res = testfun(10, 10, vmultiplier, alphalevels, 1, abmpars, options)
 #         samples_i₀[i, j] = samples_joint[i, j][2]
 #     end
 # end
-# CSV.wirte("FILE.csv", Tables.table(matrix), writeheader=false)
+CSV.write("examples/agent-based-models/uniB.csv", Tables.table(tr_app_samples_β), writeheader=false)
+CSV.write("examples/agent-based-models/unii.csv", Tables.table(tr_app_samples_i₀), writeheader=false)
+CSV.write("examples/agent-based-models/trueB.csv", Tables.table(post_β), writeheader=false)
+CSV.write("examples/agent-based-models/truei.csv", Tables.table(post_i₀), writeheader=false)
+CSV.write("examples/agent-based-models/joinB.csv", Tables.table(samples_β), writeheader=false)
+CSV.write("examples/agent-based-models/joini.csv", Tables.table(samples_i₀), writeheader=false)
 
 #samplecomp = DataFrame(
 #    samples = tf.(map(x-> x, tr_app_samples_β), [mean(tr_app_samples_β)]),
