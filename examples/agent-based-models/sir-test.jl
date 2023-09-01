@@ -15,20 +15,21 @@ using BayesScoreCal
 using DrWatson: @dict
 
 # Approximate/true model settings
-N_samples = 1000
+N_samples = 100
 N_adapt = 1000
+N_ind = 1000
 
 # Optimisation settings
-N_runs = 1000
+N_runs = 100
 energyβ = 1.0
 vmultiplier = 1.0
 alphalevels = [0.0, 0.25, 0.5, 0.9, 1.0]
-abmpars = [10, 0.05, 4, 1, 0.001, 0.005] 
+abmpars = [10, 0.05, 4, 1, 0.001, 0.005, N_ind] 
 #[initial infected (int), beta value, infect period (days), 
-# detection (days), speed, interaction radius]
+# detection (days), speed, interaction radius, total individuals]
 options = Optim.Options(f_tol = 0.00001)
-
-
+tspan = (0,40)
+u0 = [N_ind, 0, 0, 0]
 
 # Setup ABM for data generation
 const steps_per_day = 24
@@ -37,6 +38,15 @@ const steps_per_day = 24
 function multiplyscale(x::Matrix{Vector{Float64}}, scale::Float64) 
     μ = mean(x)
     scale .* (x .- [μ]) .+ [μ]
+end
+
+# Setup logit /inv logit helper
+function logit(p::Float64)
+    return log(p/(1-p))
+end
+
+function invlogit(p::Float64)
+    return 1/(1+exp(-p))
 end
 
 # Setup SIR ODE
@@ -54,20 +64,22 @@ function sir_ode!(du,u,p,t)
     end
 nothing
 end;
+  ODEprob = ODEProblem(sir_ode!,
+              u0,
+              tspan,
+              p)
+
 
 @model bayes_sir(y) = begin
   # Calculate number of timepoints
   l = length(y)
   i₀ ~ Uniform(0.0,1.0)
   β ~ Uniform(0.0,1.0)
-  I = i₀*Float64(N_samples)
-  u0=[Float64(N_samples)-I,I,0.0,0.0]
+  I = i₀*Float64(N_ind)
+  u0=[Float64(N_ind)-I,I,0.0,0.0]
   p=[β,10.0,0.25]
-  tspan = (0.0,float(l))
-  prob = ODEProblem(sir_ode!,
-          u0,
-          tspan,
-          p)
+  #tspan = (0.0,float(l))
+  prob = remake(ODEprob, u=u0, p=p)
   sol = solve(prob,
               Tsit5(),
               saveat = 1.0)
@@ -78,10 +90,6 @@ end;
     y[i] ~ Poisson(sol_X[i])
   end
 end;
-
-function test()
-    sir_model = sir_initiation()
-end
 
 # Need function wrapper here
 function testfun(N_adapt::Int64, N_samples::Int64, vmultiplier::Float64,
@@ -99,6 +107,8 @@ function testfun(N_adapt::Int64, N_samples::Int64, vmultiplier::Float64,
     end
 
     function sir_initiation(; 
+            β = abmpars[2],
+            initial_infected = abmpars[1],
             infection_period = Int(abmpars[3]) * steps_per_day,
             detection_time = Int(abmpars[4]) * steps_per_day,
             reinfection_probability = 0.0,
@@ -107,11 +117,8 @@ function testfun(N_adapt::Int64, N_samples::Int64, vmultiplier::Float64,
             dt = 1.0, 
             speed = abmpars[5],
             death_rate = 0,
-            N = N_samples,
-            initial_infected = abmpars[1],
+            N = abmpars[7],
             #seed = 42,
-            βmin = abmpars[2],
-            βmax = abmpars[2],
         )
         properties = (;
                       infection_period,
@@ -135,7 +142,7 @@ function testfun(N_adapt::Int64, N_samples::Int64, vmultiplier::Float64,
             isisolated = ind ≤ isolated * N
             mass = isisolated ? Inf : 1.0
             vel = isisolated ? (0.0, 0.0) : sincos(2π * rand(model.rng)) .* speed
-            β = (βmax - βmin) * rand(model.rng) + βmin
+            β = β
             add_agent!(pos, model, vel, mass, 0, status, β)
         end
         return model
@@ -183,9 +190,6 @@ function testfun(N_adapt::Int64, N_samples::Int64, vmultiplier::Float64,
     end
     # Generate ABM data
     sir_model = sir_initiation()
-## Store un-xform samples
-#CSV.write("examples/agent-based-models/preB.csv", Tables.table(tr_app_samples_β), writeheader=false)
-#CSV.write("examples/agent-based-models/prei.csv", Tables.table(tr_app_samples_i₀), writeheader=false)
 
     infected(x) = count(i == :I for i in x)
     recovered(x) = count(i == :R for i in x)
@@ -203,7 +207,8 @@ function testfun(N_adapt::Int64, N_samples::Int64, vmultiplier::Float64,
     ode_nuts = Chains{}
     while next == false
         try
-            ode_nuts = sample(sir_bayes_model,NUTS(1.0),N_samples);
+            # Use 4 times thinning
+            ode_nuts = sample(sir_bayes_model,NUTS(),N_samples*4);
             next = true
         catch e
             next = false
@@ -212,9 +217,10 @@ function testfun(N_adapt::Int64, N_samples::Int64, vmultiplier::Float64,
     
     is_weights = ones(N_samples)
 
-    # Get posterior samples (TODO: update to joint samples)
-    post_i₀ = vec(ode_nuts[:i₀].data)
-    post_β = vec(ode_nuts[:β].data)
+    # Get posterior samples (TODO: update to joint samples) thin here
+    # app_post_tdgp
+    post_i₀ = vec(ode_nuts[:i₀].data[:4:end])
+    post_β = vec(ode_nuts[:β].data[:4:end])
     
     samplecomp = DataFrame(
         samples = post_β,
@@ -244,26 +250,52 @@ function testfun(N_adapt::Int64, N_samples::Int64, vmultiplier::Float64,
         while next == false
             try
                 # Setup for approximate distribution (for first dist)
-                tmax = 40.0 # Need to set variable
-                tspan = (0.0,tmax)
-                obstimes = 1.0:1.0:tmax
-                I = post_i₀[t]*N_samples
-                u0 = [float(N_samples) - I,I,0.0,0.0] # S,I.R,C
-                p = [post_β[t],10.0,0.25]; # β,c,γ
+                #tmax = 40.0 # Need to set variable
+                #tspan = (0.0,tmax)
+                #obstimes = 1.0:1.0:tmax
+                #I = post_i₀[t]*N_samples
+                #u0 = [float(N_samples) - I,I,0.0,0.0] # S,I.R,C
+                #p = [post_β[t],10.0,0.25]; # β,c,γ
 
-                prob_ode = ODEProblem(sir_ode!,u0,tspan,p); 
-                                sol_ode = solve(prob_ode,
-                                                Tsit5(),
-                                                saveat = 1.0);
-                sol_ode = solve(prob_ode,
-                                Tsit5(),
-                                saveat = 1.0);
+                #prob_ode = ODEProblem(sir_ode!,u0,tspan,p); 
+                #                sol_ode = solve(prob_ode,
+                #                                Tsit5(),
+                #                                saveat = 1.0);
+                #sol_ode = solve(prob_ode,
+                #                Tsit5(),
+                #                saveat = 1.0);
 
-                # Generate new data from ODE above
-                C = Array(sol_ode)[4,:] # Cumulative cases
-                X = C[2:end] - C[1:(end-1)];
-                Z = rand.(Poisson.(X))
-                tmp_ode_nuts = sample(bayes_sir(Z), NUTS(1.0), N_samples); 
+                ## Generate new data from ODE above
+                #C = Array(sol_ode)[4,:] # Cumulative cases
+                #X = C[2:end] - C[1:(end-1)];
+                #Z = rand.(Poisson.(X))
+                #tmp_ode_nuts = sample(bayes_sir(Z), NUTS(1.0), N_samples); 
+                
+                sir_model = sir_initiation(β = post_β[t], 
+                                           initial_infected = post_i₀)
+
+                infected(x) = count(i == :I for i in x)
+                recovered(x) = count(i == :R for i in x)
+                adata = [(:status, infected), (:status, recovered)]
+                # Need to add variable for time length here
+                data1, _ = run!(sir_model, sir_agent_step!,  sir_model_step!, 40*24; adata)
+
+                # Generate data for ODE
+                tmp = data1[1:steps_per_day:end, 2:3] # Grab one obs per day
+                infect = tmp[2:end,1] - tmp[1:(end-1),1]
+                recov = tmp[2:end,2] - tmp[1:(end-1),2]
+                Z = infect + recov
+                sir_bayes_model = bayes_sir(Z)
+                next = false
+                tmp_ode_nuts = Chains{}
+                while next == false
+                    try
+                        tmp_ode_nuts = sample(sir_bayes_model,NUTS(),N_samples);
+                        next = true
+                    catch e
+                        next = false
+                    end
+                end
 
                 tr_app_samples_i₀[:, t] = tmp_ode_nuts[:i₀]
                 tr_app_samples_β[:, t] = tmp_ode_nuts[:β]
@@ -292,19 +324,21 @@ function testfun(N_adapt::Int64, N_samples::Int64, vmultiplier::Float64,
                                          tr_app_samples_i₀[:,i])]
     end
 
-    # X-form them
+    # X-form them TODO approx post for tdgp - rename
     tr_app_samples_joint = 
             inverse(bij).(multiplyscale(bij.(tr_app_samples_joint),
                                         vmultiplier))
 
-    # Grab univariate out again
+    # Grab univariate out again and logit xform
     for i in 1:N_adapt
         for j in 1:N_samples
-            tr_app_samples_β[i, j] = tr_app_samples_joint[i, j][1]
-            tr_app_samples_i₀[i, j] = tr_app_samples_joint[i, j][2]
+            tr_app_samples_β[i, j] = logit(tr_app_samples_joint[i, j][1])
+            tr_app_samples_i₀[i, j] = logit(tr_app_samples_joint[i, j][2])
+            tr_app_samples_joint[i, j] = [tr_app_samples_β[i, j], 
+                                          tr_app_samples_i₀[i, j]]
         end
     end
-    
+   
     # Calibrate samples
     # Univariate
     # β
@@ -324,13 +358,16 @@ function testfun(N_adapt::Int64, N_samples::Int64, vmultiplier::Float64,
     res = energyscorecalibrate!(tf, cal, is_weights)
     samples_joint = tf.(map(x-> x, tr_app_samples_joint), 
                         [mean(tr_app_samples_joint)])
+    # Inv-logit transform B and i
     # Save data
-    samples_joint_β = samples_β
-    samples_joint_i₀ = samples_i₀
+    samples_joint_β = deepcopy(samples_β)
+    samples_joint_i₀ = deepcopy(samples_i₀)
     for i in 1:N_adapt
         for j in 1:N_samples
-            samples_joint_β[i, j] = samples_joint[i, j][1]
-            samples_joint_i₀[i, j] = samples_joint[i, j][2]
+            samples_joint_β[i, j] = invlogit(samples_joint[i, j][1])
+            samples_joint_i₀[i, j] = invlogit(samples_joint[i, j][2])
+            samples_β[i, j] = invlogit(samples_β[i, j])
+            samples_i₀[i, j] = invlogit(samples_i₀[i, j])
         end
     end
     for k in 1:N_samples
@@ -384,13 +421,14 @@ allres = reduce(vcat, res)
 res = testfun.([N_adapt], 
                [N_samples], 
                [vmultiplier], 
-               1:N_runs, 
+               1:10, 
                [abmpars], 
                [options])
 # Join results
 allres = vcat(reduce(vcat, res)...)
 
-
+#preB = tr_app_samples_β
+#prei = tr_app_samples_i₀
 # Use for save purposes
 # for i in 1:N_adapt
 #     for j in 1:N_energy
@@ -398,13 +436,25 @@ allres = vcat(reduce(vcat, res)...)
 #         samples_i₀[i, j] = samples_joint[i, j][2]
 #     end
 # end
-#CSV.write("examples/agent-based-models/uniB.csv", Tables.table(tr_app_samples_β), writeheader=false)
-#CSV.write("examples/agent-based-models/unii.csv", Tables.table(tr_app_samples_i₀), writeheader=false)
-#CSV.write("examples/agent-based-models/trueB.csv", Tables.table(post_β), writeheader=false)
-#CSV.write("examples/agent-based-models/truei.csv", Tables.table(post_i₀), writeheader=false)
-#CSV.write("examples/agent-based-models/joinB.csv", Tables.table(samples_β), writeheader=false)
-#CSV.write("examples/agent-based-models/joini.csv", Tables.table(samples_i₀), writeheader=false)
+CSV.write("../examples/agent-based-models/preB.csv", Tables.table(tr_app_samples_β), writeheader=false)
+CSV.write("../examples/agent-based-models/prei.csv", Tables.table(tr_app_samples_i₀), writeheader=false)
+CSV.write("../examples/agent-based-models/uniB.csv", Tables.table(samples_β), writeheader=false)
+CSV.write("../examples/agent-based-models/unii.csv", Tables.table(samples_i₀), writeheader=false)
+CSV.write("../examples/agent-based-models/trueB.csv", Tables.table(post_β), writeheader=false)
+CSV.write("../examples/agent-based-models/truei.csv", Tables.table(post_i₀), writeheader=false)
+CSV.write("../examples/agent-based-models/joinB.csv", Tables.table(samples_joint_β), writeheader=false)
+CSV.write("../examples/agent-based-models/joini.csv", Tables.table(samples_joint_i₀), writeheader=false)
 
+# Test
+mean(([mean(tr_app_samples_β[:,col]) for col=1:size(tr_app_samples_β)[2]] - post_β))
+mean(([mean(samples_β[:,col]) for col=1:size(samples_β)[2]] - post_β))
+mean(([mean(samples_joint_β[:,col]) for col=1:size(samples_joint_β)[2]] - post_β))
+
+mean(([mean(tr_app_samples_i₀[:,col]) for col=1:size(tr_app_samples_i₀)[2]] - post_i₀))
+mean(([mean(samples_i₀[:,col]) for col=1:size(samples_i₀)[2]] - post_i₀))
+mean(([mean(samples_joint_i₀[:,col]) for col=1:size(samples_joint_i₀)[2]] - post_i₀))
+
+#CSV.write("../examples/agent-based-models/multi.csv", Tables.table(res), writeheader=true, bufsize=263015500)
 #samplecomp = DataFrame(
 #    samples = tf.(map(x-> x, tr_app_samples_β), [mean(tr_app_samples_β)]),
 #    method = "Adjust-post",
