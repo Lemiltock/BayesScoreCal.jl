@@ -8,14 +8,14 @@ using StatsPlots
 using CSV
 using Agents
 using InteractiveDynamics
-using CairoMakie
+#using CairoMakie
 using Optim
 using BayesScoreCal
 
 using DrWatson: @dict
 
 # Approximate/true model settings
-N_samples = 100
+N_samples = 250
 N_adapt = 1000
 N_ind = 1000
 
@@ -64,10 +64,11 @@ function sir_ode!(du,u,p,t)
     end
 nothing
 end;
-  ODEprob = ODEProblem(sir_ode!,
+
+ODEprob = ODEProblem(sir_ode!,
               u0,
               tspan,
-              p)
+              [0.05, 10.0, 0.25])
 
 
 @model bayes_sir(y) = begin
@@ -79,7 +80,11 @@ end;
   u0=[Float64(N_ind)-I,I,0.0,0.0]
   p=[β,10.0,0.25]
   #tspan = (0.0,float(l))
-  prob = remake(ODEprob, u=u0, p=p)
+  prob = ODEProblem(sir_ode!,
+              u0,
+              tspan,
+              p) #[0.05, 10.0, 0.25])
+#remake(ODEprob, u=u0, p=p)
   sol = solve(prob,
               Tsit5(),
               saveat = 1.0)
@@ -181,7 +186,7 @@ function testfun(N_adapt::Int64, N_samples::Int64, vmultiplier::Float64,
     function recover_or_die!(agent, model)
         if agent.days_infected ≥ model.infection_period
             if rand(model.rng) ≤ model.death_rate
-                kill_agent!(agent, model)
+                remove_agent!(agent, model)
             else
                 agent.status = :R
                 agent.days_infected = 0
@@ -209,18 +214,19 @@ function testfun(N_adapt::Int64, N_samples::Int64, vmultiplier::Float64,
         try
             # Use 4 times thinning
             ode_nuts = sample(sir_bayes_model,NUTS(),N_samples*4);
-            next = true
+            next = true;
+            break;
         catch e
             next = false
         end
     end
-    
+
     is_weights = ones(N_samples)
 
     # Get posterior samples (TODO: update to joint samples) thin here
     # app_post_tdgp
-    post_i₀ = vec(ode_nuts[:i₀].data[:4:end])
-    post_β = vec(ode_nuts[:β].data[:4:end])
+    post_i₀ = vec(ode_nuts[:i₀].data[1:4:end])
+    post_β = vec(ode_nuts[:β].data[1:4:end])
     
     samplecomp = DataFrame(
         samples = post_β,
@@ -234,9 +240,7 @@ function testfun(N_adapt::Int64, N_samples::Int64, vmultiplier::Float64,
     samplecomp = DataFrame(
         samples = post_i₀,
         method = "True-post",
-        iter = iter,
-        index = 1,
-        param = "i₀",
+        iter = iter, index = 1, param = "i₀",
         trueval = post_i₀[1]
        )
     push!(dfsamples, samplecomp)
@@ -272,7 +276,7 @@ function testfun(N_adapt::Int64, N_samples::Int64, vmultiplier::Float64,
                 #tmp_ode_nuts = sample(bayes_sir(Z), NUTS(1.0), N_samples); 
                 
                 sir_model = sir_initiation(β = post_β[t], 
-                                           initial_infected = post_i₀)
+                                           initial_infected = post_i₀[t]*N_ind)
 
                 infected(x) = count(i == :I for i in x)
                 recovered(x) = count(i == :R for i in x)
@@ -290,7 +294,7 @@ function testfun(N_adapt::Int64, N_samples::Int64, vmultiplier::Float64,
                 tmp_ode_nuts = Chains{}
                 while next == false
                     try
-                        tmp_ode_nuts = sample(sir_bayes_model,NUTS(),N_samples);
+                        tmp_ode_nuts = sample(sir_bayes_model,NUTS(),N_adapt);
                         next = true
                     catch e
                         next = false
@@ -316,13 +320,15 @@ function testfun(N_adapt::Int64, N_samples::Int64, vmultiplier::Float64,
     bij = Bijectors.Stacked(bij_all.bs[1:2]...)
 
     # Get joint samples
-    post_joint = [[a, b] for (a,b) in zip(post_β, post_i₀)]
     tr_app_samples_joint = Matrix{Vector{Float64}}(undef, N_adapt, N_samples)
     for i in 1:N_samples
         tr_app_samples_joint[:,i] = [[a,b] for (a,b) in 
                                      zip(tr_app_samples_β[:,i], 
                                          tr_app_samples_i₀[:,i])]
     end
+    prexfer_joint = deepcopy(tr_app_samples_joint)
+    prexfer_β = deepcopy(tr_app_samples_β)
+    prexfer_i₀ = deepcopy(tr_app_samples_i₀)
 
     # X-form them TODO approx post for tdgp - rename
     tr_app_samples_joint = 
@@ -330,15 +336,18 @@ function testfun(N_adapt::Int64, N_samples::Int64, vmultiplier::Float64,
                                         vmultiplier))
 
     # Grab univariate out again and logit xform
-    for i in 1:N_adapt
-        for j in 1:N_samples
+    for j in 1:N_samples
+        for i in 1:N_adapt
             tr_app_samples_β[i, j] = logit(tr_app_samples_joint[i, j][1])
             tr_app_samples_i₀[i, j] = logit(tr_app_samples_joint[i, j][2])
             tr_app_samples_joint[i, j] = [tr_app_samples_β[i, j], 
                                           tr_app_samples_i₀[i, j]]
         end
+        post_β[j] = logit(post_β[j])
+        post_i₀[j] = logit(post_i₀[j])
     end
-   
+    post_joint = [[a, b] for (a,b) in zip(post_β, post_i₀)]
+    
     # Calibrate samples
     # Univariate
     # β
@@ -362,14 +371,19 @@ function testfun(N_adapt::Int64, N_samples::Int64, vmultiplier::Float64,
     # Save data
     samples_joint_β = deepcopy(samples_β)
     samples_joint_i₀ = deepcopy(samples_i₀)
-    for i in 1:N_adapt
-        for j in 1:N_samples
+    for j in 1:N_samples
+        for i in 1:N_adapt
             samples_joint_β[i, j] = invlogit(samples_joint[i, j][1])
             samples_joint_i₀[i, j] = invlogit(samples_joint[i, j][2])
             samples_β[i, j] = invlogit(samples_β[i, j])
             samples_i₀[i, j] = invlogit(samples_i₀[i, j])
+            tr_app_samples_β[i, j] = invlogit(tr_app_samples_β[i, j])
+            tr_app_samples_i₀[i, j] = invlogit(tr_app_samples_i₀[i, j])
         end
+        post_β[j] = invlogit(post_β[j])
+        post_i₀[j] = invlogit(post_i₀[j])
     end
+    post_joint = [[a, b] for (a,b) in zip(post_β, post_i₀)]
     for k in 1:N_samples
         samplecomp = DataFrame(
             samples = samples_β[:,k],

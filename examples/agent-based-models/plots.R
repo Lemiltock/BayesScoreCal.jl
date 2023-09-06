@@ -80,6 +80,7 @@ CI_check <- function(act, approx){
 trueB <- as.vector(read.csv("trueB.csv", header=F))$V1
 truei <- as.vector(read.csv("truei.csv", header=F))$V1
 truejoint <- cbind(trueB, truei)
+N <- length(trueB)
 
 # Read in uni approx samples
 uniB <- read.csv("uniB.csv", header=F)
@@ -92,18 +93,18 @@ prei <- read.csv("prei.csv", header=F)
 # Read in joint approx samples
 joinB <- read.csv("joinB.csv", header=F)
 joini <- read.csv("joini.csv", header=F)
-joint <- array(rep(0, 1000*1000*2), c(1000, 1000, 2))
-for(i in 1:1000){
-    for(j in 1:1000){
+joint <- array(rep(0, N*N*2), c(N, N, 2))
+for(i in 1:N){
+    for(j in 1:N){
         joint[i,j,1] <- joinB[i,j]
         joint[i,j,2] <- joini[i,j]
     }
 }
 
 # Find pre joint approx samplses
-prejoint <- array(rep(0, 1000*1000*2), c(1000, 1000, 2))
-for(i in 1:1000){
-    for(j in 1:1000){
+prejoint <- array(rep(0, N*N*2), c(N, N, 2))
+for(i in 1:N){
+    for(j in 1:N){
         prejoint[i,j,1] <- preB[i,j]
         prejoint[i,j,2] <- prei[i,j]
     }
@@ -125,12 +126,12 @@ apppre <- true
 apppreB <- true
 appprei <- true
 for(i in 1:length(true)){
-    app[i] = sum(test < true[i])/1000
-    appB[i] = sum(testB < true[i])/1000
-    appi[i] = sum(testi < true[i])/1000
-    apppre[i] = sum(testpre < true[i])/1000
-    apppreB[i] = sum(testpreB < true[i])/1000
-    appprei[i] = sum(testprei < true[i])/1000
+    app[i] = sum(test < true[i])/N
+    appB[i] = sum(testB < true[i])/N
+    appi[i] = sum(testi < true[i])/N
+    apppre[i] = sum(testpre < true[i])/N
+    apppreB[i] = sum(testpreB < true[i])/N
+    appprei[i] = sum(testprei < true[i])/N
 }
 
 ### Quick plot
@@ -155,9 +156,9 @@ plot_data <- data.frame('Actual coverage'=c(app, appB, appi,
                                    rep('preu', length(app))))
 
 # Setup legend labels
-my.labs <- list(bquote(beta ~ "," ~ mu),bquote(beta),bquote(mu),
-                bquote("pre" ~ beta ~ "," ~ mu),bquote("pre" ~ beta),
-                bquote("pre" ~ mu))
+my.labs <- list(bquote(beta ~ "," ~ i[0]),bquote(beta),bquote(i[0]),
+                bquote("pre" ~ beta ~ "," ~ i[0]),bquote("pre" ~ beta),
+                bquote("pre" ~ i[0]))
 
 # Get colours for groups
 default_palette <- scales::hue_pal()(6)
@@ -180,6 +181,8 @@ p1 <- ggplot(plot_data, aes(x=Target.coverage,
                             labels=my.labs) +
         theme_linedraw()
 
+p1
+    
 savename <- "ABM_CI_plot_pre.eps"
 
 ggsave(savename,
