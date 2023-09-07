@@ -15,7 +15,7 @@ using BayesScoreCal
 using DrWatson: @dict
 
 # Approximate/true model settings
-N_samples = 250
+N_samples = 1000
 N_adapt = 1000
 N_ind = 1000
 
@@ -276,7 +276,8 @@ function testfun(N_adapt::Int64, N_samples::Int64, vmultiplier::Float64,
                 #tmp_ode_nuts = sample(bayes_sir(Z), NUTS(1.0), N_samples); 
                 
                 sir_model = sir_initiation(β = post_β[t], 
-                                           initial_infected = post_i₀[t]*N_ind)
+                                           initial_infected = 
+                                                post_i₀[t]*Float64(N_ind))
 
                 infected(x) = count(i == :I for i in x)
                 recovered(x) = count(i == :R for i in x)
@@ -450,14 +451,14 @@ allres = vcat(reduce(vcat, res)...)
 #         samples_i₀[i, j] = samples_joint[i, j][2]
 #     end
 # end
-CSV.write("../examples/agent-based-models/preB.csv", Tables.table(tr_app_samples_β), writeheader=false)
-CSV.write("../examples/agent-based-models/prei.csv", Tables.table(tr_app_samples_i₀), writeheader=false)
-CSV.write("../examples/agent-based-models/uniB.csv", Tables.table(samples_β), writeheader=false)
-CSV.write("../examples/agent-based-models/unii.csv", Tables.table(samples_i₀), writeheader=false)
-CSV.write("../examples/agent-based-models/trueB.csv", Tables.table(post_β), writeheader=false)
-CSV.write("../examples/agent-based-models/truei.csv", Tables.table(post_i₀), writeheader=false)
-CSV.write("../examples/agent-based-models/joinB.csv", Tables.table(samples_joint_β), writeheader=false)
-CSV.write("../examples/agent-based-models/joini.csv", Tables.table(samples_joint_i₀), writeheader=false)
+CSV.write("../examples/agent-based-models/preB-1000.csv", Tables.table(tr_app_samples_β), writeheader=false)
+CSV.write("../examples/agent-based-models/prei-1000.csv", Tables.table(tr_app_samples_i₀), writeheader=false)
+CSV.write("../examples/agent-based-models/uniB-1000.csv", Tables.table(samples_β), writeheader=false)
+CSV.write("../examples/agent-based-models/unii-1000.csv", Tables.table(samples_i₀), writeheader=false)
+CSV.write("../examples/agent-based-models/trueB-1000.csv", Tables.table(post_β), writeheader=false)
+CSV.write("../examples/agent-based-models/truei-1000.csv", Tables.table(post_i₀), writeheader=false)
+CSV.write("../examples/agent-based-models/joinB-1000.csv", Tables.table(samples_joint_β), writeheader=false)
+CSV.write("../examples/agent-based-models/joini-1000.csv", Tables.table(samples_joint_i₀), writeheader=false)
 
 # Test
 mean(([mean(tr_app_samples_β[:,col]) for col=1:size(tr_app_samples_β)[2]] - post_β))
