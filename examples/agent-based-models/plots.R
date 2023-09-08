@@ -1,6 +1,10 @@
 library(ggplot2)
 library(ks)
 
+rm(list=ls())
+
+N <- 250 # Number of samples
+
 CI_check <- function(act, approx){
     if(is.vector(act)){
         # act is 1d-mat of samples, approx is matrix each col is for an act samp
@@ -77,24 +81,25 @@ CI_check <- function(act, approx){
 
 
 # Read in true samples
-trueB <- as.vector(read.csv("trueB.csv", header=F))$V1
-truei <- as.vector(read.csv("truei.csv", header=F))$V1
+trueB <- as.vector(read.csv(paste("trueB-", N, ".csv", sep=""), header=F))$V1
+truei <- as.vector(read.csv(paste("truei-", N, ".csv", sep=""), header=F))$V1
 truejoint <- cbind(trueB, truei)
-N <- length(trueB)
+#N <- length(trueB) # Number of samples
 
 # Read in uni approx samples
-uniB <- read.csv("uniB.csv", header=F)
-unii <- read.csv("unii.csv", header=F)
+uniB <- read.csv(paste("uniB-", N, ".csv", sep=""), header=F)
+unii <- read.csv(paste("unii-", N, ".csv", sep=""), header=F)
 
 # Read in pre uni approx
-preB <- read.csv("preB.csv", header=F)
-prei <- read.csv("prei.csv", header=F)
+preB <- read.csv(paste("preB-", N, ".csv", sep=""), header=F)
+prei <- read.csv(paste("prei-", N, ".csv", sep=""), header=F)
 
 # Read in joint approx samples
-joinB <- read.csv("joinB.csv", header=F)
-joini <- read.csv("joini.csv", header=F)
-joint <- array(rep(0, N*N*2), c(N, N, 2))
-for(i in 1:N){
+joinB <- read.csv(paste("joinB-", N, ".csv", sep=""), header=F)
+joini <- read.csv(paste("joini-", N, ".csv", sep=""), header=F)
+M <- dim(joinB)[1] # Number of approx samples per samples
+joint <- array(rep(0, M*N*2), c(M, N, 2))
+for(i in 1:M){
     for(j in 1:N){
         joint[i,j,1] <- joinB[i,j]
         joint[i,j,2] <- joini[i,j]
@@ -102,8 +107,8 @@ for(i in 1:N){
 }
 
 # Find pre joint approx samplses
-prejoint <- array(rep(0, N*N*2), c(N, N, 2))
-for(i in 1:N){
+prejoint <- array(rep(0, M*N*2), c(M, N, 2))
+for(i in 1:M){
     for(j in 1:N){
         prejoint[i,j,1] <- preB[i,j]
         prejoint[i,j,2] <- prei[i,j]
@@ -143,7 +148,6 @@ for(i in 1:length(true)){
 # lines(apppre, true, col='red')
 # lines(apppreB, true, col='pink')
 # lines(appprei, true, col='orange')
-
  # Generate nice plot
 plot_data <- data.frame('Actual coverage'=c(app, appB, appi,
                                             apppre, apppreB, appprei),
@@ -183,7 +187,7 @@ p1 <- ggplot(plot_data, aes(x=Target.coverage,
 
 p1
     
-savename <- "ABM_CI_plot_pre.eps"
+savename <- paste("ABM_CI_plot_pre_", N, ".eps", sep="")
 
 ggsave(savename,
        plot=p1,
