@@ -3,7 +3,7 @@ library(ks)
 
 rm(list=ls())
 
-N <- 250 # Number of samples
+N <- 100 # Number of samples
 
 CI_check <- function(act, approx){
     if(is.vector(act)){
@@ -82,27 +82,27 @@ CI_check <- function(act, approx){
 
 # Read in true samples
 trueB <- as.vector(read.csv(paste("trueB-", N, ".csv", sep=""), header=F))$V1
-truei <- as.vector(read.csv(paste("truei-", N, ".csv", sep=""), header=F))$V1
-truejoint <- cbind(trueB, truei)
+trueG <- as.vector(read.csv(paste("trueG-", N, ".csv", sep=""), header=F))$V1
+truejoint <- cbind(trueB, trueG)
 #N <- length(trueB) # Number of samples
 
 # Read in uni approx samples
 uniB <- read.csv(paste("uniB-", N, ".csv", sep=""), header=F)
-unii <- read.csv(paste("unii-", N, ".csv", sep=""), header=F)
+uniG <- read.csv(paste("uniG-", N, ".csv", sep=""), header=F)
 
 # Read in pre uni approx
 preB <- read.csv(paste("preB-", N, ".csv", sep=""), header=F)
-prei <- read.csv(paste("prei-", N, ".csv", sep=""), header=F)
+preG <- read.csv(paste("preG-", N, ".csv", sep=""), header=F)
 
 # Read in joint approx samples
 joinB <- read.csv(paste("joinB-", N, ".csv", sep=""), header=F)
-joini <- read.csv(paste("joini-", N, ".csv", sep=""), header=F)
+joinG <- read.csv(paste("joinG-", N, ".csv", sep=""), header=F)
 M <- dim(joinB)[1] # Number of approx samples per samples
 joint <- array(rep(0, M*N*2), c(M, N, 2))
 for(i in 1:M){
     for(j in 1:N){
         joint[i,j,1] <- joinB[i,j]
-        joint[i,j,2] <- joini[i,j]
+        joint[i,j,2] <- joinG[i,j]
     }
 }
 
@@ -111,32 +111,32 @@ prejoint <- array(rep(0, M*N*2), c(M, N, 2))
 for(i in 1:M){
     for(j in 1:N){
         prejoint[i,j,1] <- preB[i,j]
-        prejoint[i,j,2] <- prei[i,j]
+        prejoint[i,j,2] <- preG[i,j]
     }
 }
 
 # Generate CI
 test <- CI_check(truejoint, joint)
 testB <- CI_check(trueB, uniB)
-testi <- CI_check(truei, unii)
+testG <- CI_check(trueG, uniG)
 testpre <- CI_check(truejoint, prejoint)
 testpreB <- CI_check(trueB, preB)
-testprei <- CI_check(truei, prei)
+testpreG <- CI_check(trueG, preG)
 
 true <- seq(0.05, 0.95, 0.01)
 app <- true
 appB <- true
-appi <- true
+appG <- true
 apppre <- true
 apppreB <- true
-appprei <- true
+apppreG <- true
 for(i in 1:length(true)){
     app[i] = sum(test < true[i])/N
     appB[i] = sum(testB < true[i])/N
-    appi[i] = sum(testi < true[i])/N
+    appG[i] = sum(testG < true[i])/N
     apppre[i] = sum(testpre < true[i])/N
     apppreB[i] = sum(testpreB < true[i])/N
-    appprei[i] = sum(testprei < true[i])/N
+    apppreG[i] = sum(testpreG < true[i])/N
 }
 
 ### Quick plot
@@ -149,8 +149,8 @@ for(i in 1:length(true)){
 # lines(apppreB, true, col='pink')
 # lines(appprei, true, col='orange')
  # Generate nice plot
-plot_data <- data.frame('Actual coverage'=c(app, appB, appi,
-                                            apppre, apppreB, appprei),
+plot_data <- data.frame('Actual coverage'=c(app, appB, appG,
+                                            apppre, apppreB, apppreG),
                         'Target coverage'=rep(true, 6),
                         'Params'=c(rep('(B, u)', length(app)),
                                    rep('B', length(app)),
@@ -160,9 +160,9 @@ plot_data <- data.frame('Actual coverage'=c(app, appB, appi,
                                    rep('preu', length(app))))
 
 # Setup legend labels
-my.labs <- list(bquote(beta ~ "," ~ i[0]),bquote(beta),bquote(i[0]),
-                bquote("pre" ~ beta ~ "," ~ i[0]),bquote("pre" ~ beta),
-                bquote("pre" ~ i[0]))
+my.labs <- list(bquote(beta ~ "," ~ gamma),bquote(beta),bquote(gamma),
+                bquote("pre" ~ beta ~ "," ~ gamma),bquote("pre" ~ beta),
+                bquote("pre" ~ gamma))
 
 # Get colours for groups
 default_palette <- scales::hue_pal()(6)
@@ -195,4 +195,4 @@ ggsave(savename,
        dpi = 1200,
        width = 20,
        height = 15,
-       units = "cm")
+       nits = "cm")

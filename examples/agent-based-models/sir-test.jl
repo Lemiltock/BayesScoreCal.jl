@@ -29,7 +29,7 @@ abmpars = [10, 0.05, 4, 1, 0.001, 0.005, N_ind]
 # detection (days), speed, interaction radius, total individuals]
 options = Optim.Options(f_tol = 0.00001)
 tspan = (0,40)
-u0 = [N_ind, 0, 0, 0]
+u0 = [N_ind*0.9, N_ind*0.1, 0, 0]
 
 # Setup ABM for data generation
 const steps_per_day = 24
@@ -68,7 +68,7 @@ end;
 ODEprob = ODEProblem(sir_ode!,
               u0,
               tspan,
-              [0.05, 20.0, 0.25])
+              [0.05, 1.0, 0.25])
               #[0.05, 10.0, 0.25])
 
 
@@ -80,7 +80,7 @@ ODEprob = ODEProblem(sir_ode!,
   I = i₀*Float64(N_ind)
   u0=[Float64(N_ind)-I,I,0.0,0.0]
   #p=[β,10.0,0.25]
-  p=[β,20.0,0.25]
+  p=[β,1.0,0.25]
   #tspan = (0.0,float(l))
   prob = ODEProblem(sir_ode!,
               u0,
@@ -173,7 +173,7 @@ function testfun(N_adapt::Int64, N_samples::Int64, vmultiplier::Float64,
         r = model.interaction_radius
         for (a1, a2) in interacting_pairs(model, r, :nearest)
             transmit!(a1, a2, model.reinfection_probability)
-            elastic_collision!(a1, a2, :mass)
+            #elastic_collision!(a1, a2, :mass)
         end
     end
 
@@ -453,14 +453,14 @@ allres = vcat(reduce(vcat, res)...)
 #         samples_i₀[i, j] = samples_joint[i, j][2]
 #     end
 # end
-CSV.write("../examples/agent-based-models/preB-100.csv", Tables.table(tr_app_samples_β), writeheader=false)
-CSV.write("../examples/agent-based-models/prei-100.csv", Tables.table(tr_app_samples_i₀), writeheader=false)
-CSV.write("../examples/agent-based-models/uniB-100.csv", Tables.table(samples_β), writeheader=false)
-CSV.write("../examples/agent-based-models/unii-100.csv", Tables.table(samples_i₀), writeheader=false)
-CSV.write("../examples/agent-based-models/trueB-100.csv", Tables.table(post_β), writeheader=false)
-CSV.write("../examples/agent-based-models/truei-100.csv", Tables.table(post_i₀), writeheader=false)
-CSV.write("../examples/agent-based-models/joinB-100.csv", Tables.table(samples_joint_β), writeheader=false)
-CSV.write("../examples/agent-based-models/joini-100.csv", Tables.table(samples_joint_i₀), writeheader=false)
+CSV.write("preB-100.csv", Tables.table(tr_app_samples_β), writeheader=false)
+CSV.write("prei-100.csv", Tables.table(tr_app_samples_i₀), writeheader=false)
+CSV.write("uniB-100.csv", Tables.table(samples_β), writeheader=false)
+CSV.write("unii-100.csv", Tables.table(samples_i₀), writeheader=false)
+CSV.write("trueB-100.csv", Tables.table(post_β), writeheader=false)
+CSV.write("truei-100.csv", Tables.table(post_i₀), writeheader=false)
+CSV.write("joinB-100.csv", Tables.table(samples_joint_β), writeheader=false)
+CSV.write("joini-100.csv", Tables.table(samples_joint_i₀), writeheader=false)
 
 # Test
 mean(([mean(tr_app_samples_β[:,col]) for col=1:size(tr_app_samples_β)[2]] - post_β))
